@@ -23,13 +23,14 @@ types.
 | `chokepointTimeline(id, days)` | `GET /api/chokepoints/{id}/timeline` | Matched |
 | `anomalies(params)` | `GET /api/anomalies` | Matched |
 | `latestInsights(limit)` | `GET /api/insights/latest` | Matched |
+| `storyAnalyze(body)` | `POST /api/story/analyze` | Matched |
 | `correlations(indices, days)` | `GET /api/correlations` | Matched |
 | `overviewStats()` | `GET /api/stats/overview` | Matched |
 
 ## Remaining Integration Gaps
 
-- The current pages still render mostly from local mock/generated data. The API client is ready,
-  but pages need a wiring pass with loading, empty, error, and stale-data states.
+- Some pages still keep local mock/generated data as a demo fallback when the API is empty or
+  unavailable. Dashboard and Insights Hub now prefer live API data where available.
 - The Macro page displays `SCFI`, but the backend collectors currently produce `BDI`,
   `FBX_GLOBAL`, `WCI_GLOBAL`, weather route indicators, and FRED proxy series. Either add an
   SCFI source on the backend or remove/hide SCFI until data exists.
@@ -41,9 +42,8 @@ types.
   breakdown. Backend responses provide reference ports, current congestion counts, and timelines;
   those view-model fields need to be derived in the frontend or exposed via a richer backend
   endpoint.
-- The Insights page expects feed rows shaped as `text`, `category`, and relative `time`.
-  Backend insights are `title`, `narrative`, `category`, `generated_at`, `metrics`, and
-  `priority`; the frontend should map these into display rows.
+- The Insights page maps backend `narrative_llm || narrative`, `category`, and timestamps into
+  feed rows and displays an AI-generated badge when LLM text is present.
 - Dashboard KPI labels are compatible with backend `overviewStats`, but trend sparklines and
   market snapshot rows still need to be assembled from `/indices`, `/ports/congestion`,
   `/anomalies`, and `/insights/latest`.

@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { Suspense, lazy, useState, useEffect } from 'react'
 import { Sidebar, type PageId } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import { Dashboard } from './pages/Dashboard'
 import { MacroIndices } from './pages/MacroIndices'
-import { VesselMap } from './pages/VesselMap'
 import { Ports } from './pages/Ports'
 import { InsightsHub } from './pages/InsightsHub'
+
+const VesselMap = lazy(() => import('./pages/VesselMap').then(module => ({ default: module.VesselMap })))
 
 export default function App() {
   const [page, setPage] = useState<PageId>('dashboard')
@@ -18,20 +19,24 @@ export default function App() {
 
   const showHeader = page !== 'vessels'
 
-  const PageComponent = {
-    dashboard: Dashboard,
-    indices: MacroIndices,
-    vessels: VesselMap,
-    ports: Ports,
-    insights: InsightsHub,
-  }[page]
+  const PageComponent = page === 'dashboard'
+    ? Dashboard
+    : page === 'indices'
+      ? MacroIndices
+      : page === 'vessels'
+        ? VesselMap
+        : page === 'ports'
+          ? Ports
+          : InsightsHub
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar active={page} open={sidebarOpen} onToggle={() => setSidebarOpen(s => !s)} onNavigate={setPage} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {showHeader && <Header theme={theme} onThemeToggle={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} page={page} />}
-        <PageComponent />
+        <Suspense fallback={<div style={{ padding: 20, color: 'var(--text-muted)' }}>Loading view...</div>}>
+          <PageComponent />
+        </Suspense>
       </div>
     </div>
   )

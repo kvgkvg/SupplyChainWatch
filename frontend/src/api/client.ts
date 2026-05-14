@@ -148,6 +148,26 @@ export interface InsightResponse {
   priority: number;
 }
 
+export type StoryEntityType = "index" | "port" | "chokepoint";
+
+export interface StoryEntity {
+  type: StoryEntityType;
+  id: string;
+}
+
+export interface StoryAnalyzeRequest {
+  entity_a: StoryEntity;
+  entity_b: StoryEntity;
+  period_days: number;
+}
+
+export interface StoryAnalyzeResponse {
+  headline: string;
+  narrative: string;
+  key_findings: string[];
+  caveats: string[];
+}
+
 export interface CorrelationCell {
   index_a: string;
   index_b: string;
@@ -208,6 +228,12 @@ export const apiClient = {
     request<AnomalyResponse[]>(`/api/anomalies${queryString(params)}`),
   latestInsights: (limit = 10) =>
     request<InsightResponse[]>(`/api/insights/latest${queryString({ limit })}`),
+  storyAnalyze: (body: StoryAnalyzeRequest) =>
+    request<StoryAnalyzeResponse>("/api/story/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   correlations: (indices: string, days = 180) =>
     request<CorrelationCell[]>(`/api/correlations${queryString({ indices, days })}`),
   overviewStats: () => request<OverviewStats>("/api/stats/overview"),

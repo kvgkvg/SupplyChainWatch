@@ -2,7 +2,14 @@ import React, { useEffect, useMemo, useState, useId } from 'react'
 import { Card } from '../components/Card'
 import { Badge } from '../components/Badge'
 import { InsightRow, type InsightCategory } from '../components/InsightRow'
-import { apiClient, type InsightResponse } from '../api/client'
+import {
+  apiClient,
+  type AnomalyResponse,
+  type CorrelationCell,
+  type InsightResponse,
+  type StoryAnalyzeResponse,
+  type StoryEntity,
+} from '../api/client'
 
 // ---- Types ----
 
@@ -66,7 +73,18 @@ const corrToColor = (v: number) => {
   return 'rgba(59,130,246,0.05)'
 }
 
-const CorrelationHeatmap: React.FC = () => {
+const cellValue = (matrix: CorrelationCell[], row: string, col: string) => {
+  if (row === col) return 1
+  const rowName = row === 'FBX' ? 'FBX_GLOBAL' : row === 'WCI' ? 'WCI_GLOBAL' : row
+  const colName = col === 'FBX' ? 'FBX_GLOBAL' : col === 'WCI' ? 'WCI_GLOBAL' : col
+  const hit = matrix.find(c =>
+    (c.index_a === rowName && c.index_b === colName) ||
+    (c.index_a === colName && c.index_b === rowName)
+  )
+  return hit?.correlation ?? null
+}
+
+const CorrelationHeatmap: React.FC<{ data: CorrelationCell[] }> = ({ data }) => {
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null)
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `40px repeat(${CORR_LABELS.length}, 1fr)`, gap: 3, alignItems: 'center' }}>
@@ -74,12 +92,17 @@ const CorrelationHeatmap: React.FC = () => {
       {CORR_LABELS.map(l => (
         <div key={l} style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'center' }}>{l}</div>
       ))}
-      {CORR_MATRIX.map((row, r) => (
+      {CORR_LABELS.map((_, r) => {
+        const row = CORR_MATRIX[r]
+        return (
         <React.Fragment key={r}>
           <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'right', paddingRight: 6 }}>
             {CORR_LABELS[r]}
           </div>
-          {row.map((v, c) => (
+          {row.map((fallback, c) => {
+            const live = cellValue(data, CORR_LABELS[r], CORR_LABELS[c])
+            const v = live ?? fallback
+            return (
             <div key={c}
               onMouseEnter={() => setHover({ r, c })}
               onMouseLeave={() => setHover(null)}
@@ -97,9 +120,9 @@ const CorrelationHeatmap: React.FC = () => {
                 {v.toFixed(2)}
               </span>
             </div>
-          ))}
+          )})}
         </React.Fragment>
-      ))}
+      )})}
     </div>
   )
 }
@@ -198,12 +221,23 @@ const SEV_COLOR: Record<string, string> = {
   high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--accent)',
 }
 
-const AnomalyTimeline: React.FC = () => {
+const liveAnomalyEvents = (anomalies: AnomalyResponse[]) => anomalies.slice(0, 12).map(anomaly => {
+  const ageMs = Date.now() - new Date(anomaly.detected_at).getTime()
+  const ageDays = Math.max(0, Math.min(90, Math.round(ageMs / 86400000)))
+  return {
+    day: 90 - ageDays,
+    severity: anomaly.severity as 'high' | 'medium' | 'low',
+    label: anomaly.explanation || anomaly.description || `${anomaly.entity_type} ${anomaly.entity_id}`,
+  }
+})
+
+const AnomalyTimeline: React.FC<{ anomalies: AnomalyResponse[] }> = ({ anomalies }) => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  const events = anomalies.length > 0 ? liveAnomalyEvents(anomalies) : ANOMALY_EVENTS
   return (
     <div style={{ position: 'relative', height: 72, marginTop: 4 }}>
       <div style={{ position: 'absolute', top: 28, left: 0, right: 0, height: 1, background: 'var(--border-subtle)' }} />
-      {ANOMALY_EVENTS.map((ev, i) => (
+      {events.map((ev, i) => (
         <div key={i} style={{ position: 'absolute', left: `${(ev.day / 90) * 100}%`, top: 22, transform: 'translateX(-50%)' }}
           onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}>
           <div style={{
@@ -216,8 +250,9 @@ const AnomalyTimeline: React.FC = () => {
           {hoverIdx === i && (
             <div style={{
               position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-              background: 'var(--bg-elevated)', border: '1px solid var(--border-default)',
+            width: 260, background: 'var(--bg-elevated)', border: '1px solid var(--border-default)',
               borderRadius: 6, padding: '4px 8px', whiteSpace: 'nowrap', zIndex: 5,
+              overflow: 'hidden', textOverflow: 'ellipsis',
               fontSize: 11, color: 'var(--text-primary)', boxShadow: 'var(--shadow-md)',
             }}>
               {ev.label}
@@ -237,24 +272,49 @@ const AnomalyTimeline: React.FC = () => {
 
 // ---- Story Mode ----
 
-const STORY_PAIRS = [
+const STORY_PAIRS: { label: string; entityA: StoryEntity; entityB: StoryEntity }[] = [
   {
-    a: 'Shanghai Port', b: 'FBX China-US',
-    narrative: 'Shanghai congestion has shown a 0.73 correlation with FBX China→US rates over the past 90 days. As Shanghai anchorage counts surged to 142 vessels (90-day high), FBX rates responded with a 3.8% increase within 5 trading days — consistent with the historical 3-7 day lag pattern.',
+    label: 'BDI × FBX',
+    entityA: { type: 'index', id: 'BDI' },
+    entityB: { type: 'index', id: 'FBX_GLOBAL' },
   },
   {
-    a: 'BDI', b: 'Iron Ore Imports',
-    narrative: 'The Baltic Dry Index closely tracks Chinese iron ore import volumes. The recent 4.2% BDI surge aligns with a reported 8% increase in weekly iron ore arrivals at Chinese ports, suggesting sustained demand for Capesize and Panamax bulk carriers on the Australia→China route.',
+    label: 'Shanghai × FBX',
+    entityA: { type: 'port', id: 'Shanghai' },
+    entityB: { type: 'index', id: 'FBX_GLOBAL' },
   },
   {
-    a: 'Suez Canal', b: 'WCI',
-    narrative: 'Suez Canal transit delays have historically preceded WCI increases by 1-2 weeks. The current 18% WoW increase in transit times, if sustained, could push WCI above the $3,000 threshold based on regression analysis of 2023-2025 disruption events.',
+    label: 'Suez × WCI',
+    entityA: { type: 'chokepoint', id: 'suez_canal' },
+    entityB: { type: 'index', id: 'WCI_GLOBAL' },
   },
 ]
 
 const StoryMode: React.FC = () => {
   const [selected, setSelected] = useState(0)
-  const story = STORY_PAIRS[selected]
+  const [story, setStory] = useState<StoryAnalyzeResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pair = STORY_PAIRS[selected]
+
+  const runStory = () => {
+    setLoading(true)
+    setError(null)
+    apiClient.storyAnalyze({
+      entity_a: pair.entityA,
+      entity_b: pair.entityB,
+      period_days: 90,
+    })
+      .then(setStory)
+      .catch(exc => setError(exc instanceof Error ? exc.message : 'Story Mode unavailable'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    runStory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -266,7 +326,7 @@ const StoryMode: React.FC = () => {
             color: selected === i ? 'var(--accent-text)' : 'var(--text-muted)',
             transition: 'all 0.15s',
           }}>
-            {s.a} × {s.b}
+            {s.label}
           </button>
         ))}
       </div>
@@ -276,11 +336,26 @@ const StoryMode: React.FC = () => {
         color: 'var(--text-secondary)',
       }}>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <Badge variant="accent">{story.a}</Badge>
+          <Badge variant="accent">{pair.entityA.id}</Badge>
           <span style={{ color: 'var(--text-muted)', fontSize: 12, alignSelf: 'center' }}>↔</span>
-          <Badge variant="info">{story.b}</Badge>
+          <Badge variant="info">{pair.entityB.id}</Badge>
+          {story && <Badge variant="success">AI-generated</Badge>}
         </div>
-        {story.narrative}
+        {loading && <div style={{ color: 'var(--text-muted)' }}>Analyzing relationship...</div>}
+        {!loading && error && (
+          <div style={{ color: 'var(--text-muted)' }}>
+            Story Mode needs live backend data for this pair. {error}
+          </div>
+        )}
+        {!loading && !error && story && (
+          <>
+            <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>{story.headline}</div>
+            <div style={{ whiteSpace: 'pre-line' }}>{story.narrative}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+              {story.key_findings.slice(0, 3).map(finding => <Badge key={finding} variant="default">{finding}</Badge>)}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -291,15 +366,36 @@ const StoryMode: React.FC = () => {
 export const InsightsHub: React.FC = () => {
   const [catFilter, setCatFilter] = useState<CatFilter>('all')
   const [apiInsights, setApiInsights] = useState<InsightResponse[]>([])
+  const [correlations, setCorrelations] = useState<CorrelationCell[]>([])
+  const [anomalies, setAnomalies] = useState<AnomalyResponse[]>([])
+  const [loadingInsights, setLoadingInsights] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+    setLoadingInsights(true)
     apiClient.latestInsights(20)
       .then(rows => {
         if (!cancelled) setApiInsights(rows)
       })
       .catch(() => {
         if (!cancelled) setApiInsights([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingInsights(false)
+      })
+    apiClient.correlations('BDI,FBX_GLOBAL,WCI_GLOBAL,SCFI', 180)
+      .then(rows => {
+        if (!cancelled) setCorrelations(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCorrelations([])
+      })
+    apiClient.anomalies({ days: 90 })
+      .then(rows => {
+        if (!cancelled) setAnomalies(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setAnomalies([])
       })
     return () => { cancelled = true }
   }, [])
@@ -337,6 +433,11 @@ export const InsightsHub: React.FC = () => {
             ))}
           </div>
           <Card style={{ padding: '4px 16px' }}>
+            {loadingInsights && (
+              <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>
+                Loading latest insights...
+              </div>
+            )}
             {filtered.map((ins, i) => (
               <InsightRow
                 key={i}
@@ -358,7 +459,7 @@ export const InsightsHub: React.FC = () => {
         <div style={{ minWidth: 0 }}>
           <Card style={{ padding: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Index Correlation Matrix</div>
-            <CorrelationHeatmap />
+            <CorrelationHeatmap data={correlations} />
           </Card>
         </div>
       </div>
@@ -375,7 +476,7 @@ export const InsightsHub: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card style={{ padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Anomaly Timeline — 90 Days</div>
-          <AnomalyTimeline />
+          <AnomalyTimeline anomalies={anomalies} />
         </Card>
         <Card style={{ padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Story Mode</div>

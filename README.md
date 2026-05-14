@@ -22,6 +22,15 @@ The backend API and analysis foundation are scaffolded:
 - Rolling z-score anomaly detection, moving-average forecasts, correlations, and template insights.
 - Postman collection at `docs/postman_collection.json`.
 
+## Week 4 Status
+
+The final integration pass adds:
+
+- API-backed Insights Hub feed, correlation heatmap, anomaly timeline, and Story Mode.
+- Dashboard onboarding, stale-data warning, and API-backed latest insight feed.
+- Lazy-loaded Vessel Map bundle for better initial dashboard performance.
+- Submission support docs: `docs/architecture.md`, `docs/insights.md`, `docs/report.md`, `docs/slides.md`, `docs/demo_script.md`, and `docs/week4_checklist.md`.
+
 Live collection requires API keys in `.env`. Copy `.env.example` to `.env` and fill in the keys before starting services.
 
 ## LLM Features

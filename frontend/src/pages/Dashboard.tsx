@@ -7,7 +7,7 @@ import { InsightRow, type InsightCategory } from '../components/InsightRow'
 import { Icons } from '../components/icons'
 import { Badge } from '../components/Badge'
 import { MOCK, fmtNum, fmtPct } from '../data/mock'
-import { apiClient, type InsightResponse } from '../api/client'
+import { apiClient, type InsightResponse, type OverviewStats } from '../api/client'
 
 interface KPICardProps {
   label: string
@@ -113,6 +113,8 @@ const normalizeCategory = (category?: string | null): InsightCategory => {
 
 export const Dashboard: React.FC = () => {
   const [apiInsights, setApiInsights] = useState<InsightResponse[]>([])
+  const [stats, setStats] = useState<OverviewStats | null>(null)
+  const [showTour, setShowTour] = useState(() => localStorage.getItem('gsw-onboarding-seen') !== '1')
 
   useEffect(() => {
     let cancelled = false
@@ -122,6 +124,13 @@ export const Dashboard: React.FC = () => {
       })
       .catch(() => {
         if (!cancelled) setApiInsights([])
+      })
+    apiClient.overviewStats()
+      .then(row => {
+        if (!cancelled) setStats(row)
+      })
+      .catch(() => {
+        if (!cancelled) setStats(null)
       })
     return () => { cancelled = true }
   }, [])
@@ -134,9 +143,36 @@ export const Dashboard: React.FC = () => {
   })), [apiInsights])
 
   const insights: FeedInsight[] = liveInsights.length > 0 ? liveInsights : MOCK.insights
+  const staleData = stats
+    ? Date.now() - new Date(stats.generated_at).getTime() > 6 * 60 * 60 * 1000
+    : false
+
+  const dismissTour = () => {
+    localStorage.setItem('gsw-onboarding-seen', '1')
+    setShowTour(false)
+  }
 
   return (
     <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg-base)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {showTour && (
+        <Card style={{ padding: 14, borderColor: 'var(--accent)', background: 'var(--accent-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-text)' }}>GlobalSupplyWatch dashboard tour</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                Start with KPIs, inspect the vessel and port map, then open Insights Hub for AI narratives and Story Mode.
+              </div>
+            </div>
+            <button onClick={dismissTour} style={{ border: 0, borderRadius: 4, padding: '5px 10px', cursor: 'pointer', color: 'var(--accent-text)', background: 'var(--bg-elevated)' }}>Got it</button>
+          </div>
+        </Card>
+      )}
+      {staleData && (
+        <Card style={{ padding: 12, borderColor: 'var(--warning)', background: 'var(--warning-muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>Data may be stale.</span>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 8 }}>Last backend summary is older than 6 hours.</span>
+        </Card>
+      )}
       {/* KPI Row */}
       <div style={{ display: 'flex', gap: 12 }}>
         <KPICard
