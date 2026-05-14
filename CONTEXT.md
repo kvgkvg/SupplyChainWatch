@@ -1,6 +1,6 @@
 # CONTEXT.md — GlobalSupplyWatch Progress Snapshot
 
-> Last updated: 2026-05-15
+> Last updated: 2026-05-15 (updated after week 4 push)
 
 ---
 
@@ -88,20 +88,40 @@ Added a full LLM layer on top of the template insights:
 
 ---
 
-## What is NOT done yet (Week 4)
+### Week 4 — Insights Hub, Polish, Deliverables (partial) ✅/🔲
 
-Per PLAN.md Day 22–28:
+| Area | Status | Notes |
+|---|---|---|
+| InsightsHub API wiring | ✅ | Fetches live correlations, anomalies, story mode; falls back to mock |
+| Story Mode wired | ✅ | Calls `POST /api/story/analyze`; `StoryAnalyzeResponse` renders headline + narrative + findings |
+| API client expanded | ✅ | New types: `StoryEntity`, `StoryAnalyzeRequest/Response`, `CorrelationCell`, `AnomalyResponse`, `OverviewStats`; new methods: `storyAnalyze()`, `correlations()`, `overviewStats()` |
+| Dashboard onboarding panel | ✅ | First-visit panel added to `Dashboard.tsx` |
+| Stale-data warning | ✅ | Warning shown when overview data is >6 h old |
+| VesselMap lazy load | ✅ | Lazy-loaded as separate Vite chunk |
+| Loading state (insights) | ✅ | Spinner/skeleton while insights fetch |
+| Docs written | ✅ | `docs/architecture.md`, `docs/insights.md` (6 insight targets), `docs/report.md`, `docs/slides.md`, `docs/demo_script.md`, `docs/week4_checklist.md` |
+| README LLM notes | ✅ | LLM setup section added |
+| Toast notifications | 🔲 | Not yet implemented |
+| Jargon tooltip glossary | 🔲 | Not yet implemented |
+| 24 h pipeline run | 🔲 | Requires live Docker services (team action) |
+| Live data verification (6 insights) | 🔲 | `docs/insights.md` has the targets; needs live/backfilled data |
+| Final EDA notebook | 🔲 | `05_initial_eda.ipynb` still placeholder |
+| Report PDF export | 🔲 | `docs/report.md` is the draft; needs LaTeX/PDF export |
+| Slide deck | 🔲 | `docs/slides.md` is the outline; needs tool (PowerPoint/Canva) |
+| Demo video | 🔲 | `docs/demo_script.md` written; needs OBS recording |
 
-- [ ] **Insights Hub polish** — `CorrelationHeatmap`, `ForecastChart`, `AnomalyTimeline` currently use mock/static data; need wiring to live API
-- [ ] **Story Mode** — frontend uses static pairs; needs wiring to `GET /api/story`
-- [ ] **UX polish** — loading skeletons, toast notifications, jargon tooltips (BDI, FBX, TEU, etc.), onboarding tour
-- [ ] **Performance** — bundle analyze, lazy-load map page
-- [ ] **Stability** — run pipelines 24 h continuously, verify zero errors; add stale-data fallback UI (>6 h)
-- [ ] **Final EDA notebook** — `05_initial_eda.ipynb` is a placeholder; needs real data analysis with 6+ verified insights
-- [ ] **Documentation** — `docs/architecture.md` with diagrams, `docs/insights.md` (6 key insights with evidence)
-- [ ] **Report** — XeLaTeX PDF (problem statement, pipeline diagram, EDA, 6 insights, conclusion, appendix)
-- [ ] **Slide deck** — 15–20 slides
-- [ ] **Demo video** — 5–7 min OBS recording
+---
+
+## What still needs human/live-data action
+
+- Run collectors continuously until tables have meaningful volume
+- `make migrate && make seed` against live Docker postgres
+- 24 h pipeline run — verify no Celery errors
+- Run `EXPLAIN ANALYZE` on vessel snapshot query with real AIS volume
+- Manually verify 6 insights in `docs/insights.md` with real/backfilled data
+- Export `docs/report.md` to PDF (XeLaTeX or assignment template)
+- Build slide deck from `docs/slides.md`
+- Record 5–7 min demo video using `docs/demo_script.md` (OBS Studio)
 
 ---
 
@@ -127,7 +147,9 @@ frontend/src/
   components/       → Card, Badge, StatusDot, AreaChart, Sparkline, MiniMap, InsightRow, layout/
   api/client.ts     → typed API client
   data/mock.ts      → fallback mock data
-docs/               → data_sources, data_dictionary, postman_collection, api_consistency_report, week1/2 checklists
+docs/               → data_sources, data_dictionary, postman_collection, api_consistency_report,
+                     architecture, insights (6 targets), report (draft), slides (outline),
+                     demo_script, week1/2/4 checklists
 ```
 
 ---
