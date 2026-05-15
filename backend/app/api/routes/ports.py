@@ -26,7 +26,7 @@ async def list_ports(
                    radius_km,
                    twenty_ft_eq_units_year
             FROM ports
-            WHERE (:region IS NULL OR region = :region)
+            WHERE (CAST(:region AS TEXT) IS NULL OR region = :region)
             ORDER BY twenty_ft_eq_units_year DESC NULLS LAST, name
             """),
         {"region": region},

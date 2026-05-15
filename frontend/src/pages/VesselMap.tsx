@@ -4,36 +4,24 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { PORT_DATA } from '../components/MiniMap'
 import { Badge } from '../components/Badge'
 import { Icons } from '../components/icons'
+import { apiClient, type VesselSnapshotItem } from '../api/client'
 
 // ---- Vessel types ----
 
-const VESSEL_TYPE_IDS = ['container', 'tanker', 'bulk', 'other'] as const
+const VESSEL_TYPE_IDS = ['cargo', 'tanker', 'passenger', 'tug', 'fishing', 'service', 'pleasure', 'other', 'unknown'] as const
 type VesselTypeId = typeof VESSEL_TYPE_IDS[number]
 
-const VESSEL_TYPE_INFO: Record<VesselTypeId, { label: string; color: string; count: number }> = {
-  container: { label: 'Container',    color: '#3B82F6', count: 4231 },
-  tanker:    { label: 'Tanker',       color: '#F59E0B', count: 3892 },
-  bulk:      { label: 'Bulk Carrier', color: '#06B6D4', count: 2847 },
-  other:     { label: 'Other',        color: '#64748B', count: 1877 },
+const VESSEL_TYPE_INFO: Record<VesselTypeId, { label: string; color: string; symbol: string }> = {
+  cargo:     { label: 'Cargo',           color: '#3B82F6', symbol: '■' },
+  tanker:    { label: 'Tanker',          color: '#F59E0B', symbol: '◆' },
+  passenger: { label: 'Passenger',       color: '#22C55E', symbol: '●' },
+  tug:       { label: 'Tug / Towing',     color: '#A855F7', symbol: '▰' },
+  fishing:   { label: 'Fishing',         color: '#06B6D4', symbol: '◇' },
+  service:   { label: 'Service',         color: '#EF4444', symbol: '+' },
+  pleasure:  { label: 'Pleasure / Sail', color: '#EC4899', symbol: '▲' },
+  other:     { label: 'Other',           color: '#94A3B8', symbol: '▪' },
+  unknown:   { label: 'Unknown',         color: '#64748B', symbol: '•' },
 }
-
-const FLAGS = ['Panama', 'Liberia', 'Marshall Is.', 'Hong Kong', 'Singapore', 'Bahamas', 'Malta', 'Greece', 'China', 'Japan']
-
-const NAMED_VESSELS = [
-  { name: 'MSC Marina',       type: 'container' as VesselTypeId, flag: 'Panama' },
-  { name: 'Maersk Eindhoven', type: 'container' as VesselTypeId, flag: 'Singapore' },
-  { name: 'CMA CGM Pegasus',  type: 'container' as VesselTypeId, flag: 'Malta' },
-  { name: 'COSCO Universe',   type: 'container' as VesselTypeId, flag: 'Hong Kong' },
-  { name: 'Ever Given',       type: 'container' as VesselTypeId, flag: 'Panama' },
-  { name: 'Nordic Voyager',   type: 'tanker'    as VesselTypeId, flag: 'Liberia' },
-  { name: 'Suezmax Pioneer',  type: 'tanker'    as VesselTypeId, flag: 'Marshall Is.' },
-  { name: 'Arabian Pearl',    type: 'tanker'    as VesselTypeId, flag: 'Liberia' },
-  { name: 'Pacific Fortune',  type: 'bulk'      as VesselTypeId, flag: 'China' },
-  { name: 'Golden Harvest',   type: 'bulk'      as VesselTypeId, flag: 'Japan' },
-  { name: 'Great Wall',       type: 'bulk'      as VesselTypeId, flag: 'Hong Kong' },
-  { name: 'Cape Brilliance',  type: 'bulk'      as VesselTypeId, flag: 'Marshall Is.' },
-  { name: 'Stena Explorer',   type: 'other'     as VesselTypeId, flag: 'Greece' },
-]
 
 const LANES: { pts: [number, number][] }[] = [
   { pts: [[122,31],[160,38],[190,40],[220,36],[240,34]] },
@@ -104,61 +92,69 @@ interface Vessel {
   imo: string; mmsi: string; lat: number; lon: number; speed: number; course: number
 }
 
-interface Viewport { zoom: number; pan: { x: number; y: number } }
-
-// ---- Data Generation ----
-
-const LANE_WEIGHTS = [4, 5, 2, 2, 1.5, 1, 1.5]
-const TOTAL_LANE_W = LANE_WEIGHTS.reduce((a, b) => a + b, 0)
-
-function seededRand(i: number, s: number): number {
-  const x = Math.sin(i * 127.1 + s * 311.7) * 43758.5453
-  return x - Math.floor(x)
-}
-
 function normalizeLon(lon: number): number {
   return ((((lon + 180) % 360) + 360) % 360) - 180
 }
 
-function generateVessels(count: number): Vessel[] {
-  const vessels: Vessel[] = []
-  for (let i = 0; i < count; i++) {
-    let r = seededRand(i, 0) * TOTAL_LANE_W, laneIdx = 0
-    for (let j = 0; j < LANES.length; j++) { r -= LANE_WEIGHTS[j]; if (r <= 0) { laneIdx = j; break } }
-    const lane = LANES[laneIdx]
-    const t = seededRand(i, 1)
-    const segIdx = Math.min(Math.floor(t * (lane.pts.length - 1)), lane.pts.length - 2)
-    const segT = t * (lane.pts.length - 1) - segIdx
-    const p0 = lane.pts[segIdx], p1 = lane.pts[segIdx + 1]
-    const typeR = seededRand(i, 4)
-    const type: VesselTypeId = typeR < 0.33 ? 'container' : typeR < 0.6 ? 'tanker' : typeR < 0.82 ? 'bulk' : 'other'
-    const named = i < NAMED_VESSELS.length ? NAMED_VESSELS[i] : null
-    vessels.push({
-      id: i,
-      name: named ? named.name : `Vessel ${String(i).padStart(4, '0')}`,
-      type: named ? named.type : type,
-      flag: named ? named.flag : FLAGS[Math.floor(seededRand(i, 7) * FLAGS.length)],
-      imo: `9${String(Math.floor(seededRand(i, 8) * 900000 + 100000))}`,
-      mmsi: String(Math.floor(seededRand(i, 9) * 900000000 + 100000000)),
-      lat: Math.max(-58, Math.min(72, p0[1] + (p1[1] - p0[1]) * segT + (seededRand(i, 3) - 0.5) * 12)),
-      lon: normalizeLon(p0[0] + (p1[0] - p0[0]) * segT + (seededRand(i, 2) - 0.5) * 20),
-      speed: Math.round((5 + seededRand(i, 5) * 18) * 10) / 10,
-      course: Math.round(seededRand(i, 6) * 360),
-    })
+function vesselTypeFromAis(vessel: VesselSnapshotItem): VesselTypeId {
+  const label = vessel.type_label?.toLowerCase() ?? ''
+  if (label.includes('cargo') || label.includes('container')) return 'cargo'
+  if (label.includes('tanker')) return 'tanker'
+  if (label.includes('passenger')) return 'passenger'
+  if (label.includes('tug') || label.includes('towing')) return 'tug'
+  if (label.includes('fishing')) return 'fishing'
+  if (label.includes('pleasure') || label.includes('sailing')) return 'pleasure'
+  if (label.includes('pilot') || label.includes('tender') || label.includes('law enforcement') || label.includes('search and rescue') || label.includes('dredging')) return 'service'
+  if (label.includes('other')) return 'other'
+  if (vessel.type !== null && vessel.type !== undefined) {
+    if (vessel.type >= 80 && vessel.type <= 89) return 'tanker'
+    if (vessel.type >= 70 && vessel.type <= 79) return 'cargo'
+    if (vessel.type >= 60 && vessel.type <= 69) return 'passenger'
+    if (vessel.type === 31 || vessel.type === 32 || vessel.type === 52) return 'tug'
+    if (vessel.type === 30) return 'fishing'
+    if (vessel.type === 36 || vessel.type === 37) return 'pleasure'
+    if ((vessel.type >= 33 && vessel.type <= 35) || (vessel.type >= 50 && vessel.type <= 59)) return 'service'
+    if (vessel.type >= 90 && vessel.type <= 99) return 'other'
   }
-  return vessels
+  return 'unknown'
 }
 
-const ALL_VESSELS = generateVessels(1200)
+function mapApiVessel(vessel: VesselSnapshotItem): Vessel {
+  const type = vesselTypeFromAis(vessel)
+  return {
+    id: vessel.mmsi,
+    name: vessel.name || `MMSI ${vessel.mmsi}`,
+    type,
+    flag: vessel.flag || 'Unknown',
+    imo: 'Unknown',
+    mmsi: String(vessel.mmsi),
+    lat: vessel.lat,
+    lon: vessel.lon,
+    speed: Math.round((vessel.sog ?? 0) * 10) / 10,
+    course: Math.round(vessel.cog ?? 0),
+  }
+}
+
+function emptyTypeCounts(): Record<VesselTypeId, number> {
+  return VESSEL_TYPE_IDS.reduce(
+    (counts, id) => ({ ...counts, [id]: 0 }),
+    {} as Record<VesselTypeId, number>,
+  )
+}
 
 // ---- Symbol Icon ----
 
 const VesselSymbolIcon: React.FC<{ type: VesselTypeId; color: string; size?: number }> = ({ type, color, size = 14 }) => (
   <svg width={size} height={size} viewBox="0 0 14 14" style={{ flexShrink: 0, display: 'block' }}>
-    {type === 'container' && <rect x="3" y="3" width="8" height="8" fill={color} />}
+    {type === 'cargo' && <rect x="3" y="3" width="8" height="8" fill={color} />}
     {type === 'tanker'    && <polygon points="7,1 12,7 7,13 2,7" fill={color} />}
-    {type === 'bulk'      && <polygon points="7,2 12.5,11.5 1.5,11.5" fill={color} />}
-    {type === 'other'     && <path d="M5.5,2 h3 v3.5 h3.5 v3 h-3.5 v3.5 h-3 v-3.5 h-3.5 v-3 h3.5 z" fill={color} />}
+    {type === 'passenger' && <circle cx="7" cy="7" r="5" fill={color} />}
+    {type === 'tug'       && <path d="M2.5 5.5h9v5h-9zM5 2.5h4v3H5z" fill={color} />}
+    {type === 'fishing'   && <polygon points="2,7 7,3 12,7 7,11" fill={color} />}
+    {type === 'service'   && <path d="M5.5,2 h3 v3.5 h3.5 v3 h-3.5 v3.5 h-3 v-3.5 h-3.5 v-3 h3.5 z" fill={color} />}
+    {type === 'pleasure'  && <polygon points="7,2 12.5,11.5 1.5,11.5" fill={color} />}
+    {type === 'other'     && <rect x="3" y="3" width="8" height="8" rx="2" fill={color} />}
+    {type === 'unknown'   && <circle cx="7" cy="7" r="4.5" fill={color} opacity="0.8" />}
   </svg>
 )
 
@@ -190,6 +186,7 @@ interface RealMapProps {
 
 const REAL_MAP_STYLE: maplibregl.StyleSpecification = {
   version: 8,
+  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
     carto: {
       type: 'raster',
@@ -217,6 +214,7 @@ function vesselsToGeoJson(vessels: Vessel[]): FeatureCollection<PointFeature> {
         type: vessel.type,
         typeLabel: VESSEL_TYPE_INFO[vessel.type].label,
         color: VESSEL_TYPE_INFO[vessel.type].color,
+        symbol: VESSEL_TYPE_INFO[vessel.type].symbol,
         flag: vessel.flag,
         speed: vessel.speed,
         course: vessel.course,
@@ -252,11 +250,59 @@ function lanesToGeoJson(): FeatureCollection<LineFeature> {
 }
 
 const emptyPoints: FeatureCollection<PointFeature> = { type: 'FeatureCollection', features: [] }
+const VESSEL_SYMBOL_LAYERS = VESSEL_TYPE_IDS.map(type => `vessels-${type}`)
+const VESSEL_INTERACTION_LAYERS = ['vessel-type-symbols', ...VESSEL_SYMBOL_LAYERS]
+
+function createVesselIcon(type: VesselTypeId, color: string): ImageData {
+  const size = 48
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas is unavailable')
+  ctx.translate(size / 2, size / 2)
+  ctx.fillStyle = color
+  ctx.strokeStyle = 'rgba(2,6,23,0.92)'
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  if (type === 'cargo') {
+    ctx.rect(-12, -12, 24, 24)
+  } else if (type === 'tanker') {
+    ctx.moveTo(0, -16); ctx.lineTo(16, 0); ctx.lineTo(0, 16); ctx.lineTo(-16, 0); ctx.closePath()
+  } else if (type === 'passenger') {
+    ctx.arc(0, 0, 12, 0, Math.PI * 2)
+  } else if (type === 'tug') {
+    ctx.rect(-14, -7, 28, 16)
+  } else if (type === 'fishing') {
+    ctx.moveTo(-16, 0); ctx.lineTo(0, -12); ctx.lineTo(16, 0); ctx.lineTo(0, 12); ctx.closePath()
+  } else if (type === 'service') {
+    ctx.moveTo(-6, -16); ctx.lineTo(6, -16); ctx.lineTo(6, -6); ctx.lineTo(16, -6); ctx.lineTo(16, 6); ctx.lineTo(6, 6); ctx.lineTo(6, 16); ctx.lineTo(-6, 16); ctx.lineTo(-6, 6); ctx.lineTo(-16, 6); ctx.lineTo(-16, -6); ctx.lineTo(-6, -6); ctx.closePath()
+  } else if (type === 'pleasure') {
+    ctx.moveTo(0, -16); ctx.lineTo(16, 15); ctx.lineTo(-16, 15); ctx.closePath()
+  } else if (type === 'other') {
+    ctx.roundRect(-12, -12, 24, 24, 5)
+  } else {
+    ctx.arc(0, 0, 11, 0, Math.PI * 2)
+  }
+  ctx.fill()
+  ctx.stroke()
+  return ctx.getImageData(0, 0, size, size)
+}
+
+function addVesselIcons(map: maplibregl.Map): void {
+  VESSEL_TYPE_IDS.forEach(type => {
+    const imageId = `vessel-${type}`
+    if (!map.hasImage(imageId)) {
+      map.addImage(imageId, createVesselIcon(type, VESSEL_TYPE_INFO[type].color), { pixelRatio: 1 })
+    }
+  })
+}
 
 const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, layers }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const popupRef = useRef<maplibregl.Popup | null>(null)
+  const hasFitVesselBoundsRef = useRef(false)
   const [ready, setReady] = useState(false)
 
   const selectedVessel = useMemo(
@@ -282,6 +328,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left')
 
     map.on('load', () => {
+      addVesselIcons(map)
       map.addSource('shipping-lanes', { type: 'geojson', data: lanesToGeoJson() })
       map.addLayer({
         id: 'shipping-lanes-glow',
@@ -371,15 +418,53 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
       map.addSource('vessels', { type: 'geojson', data: emptyPoints })
       map.addLayer({
-        id: 'vessels',
+        id: 'vessel-halos',
         type: 'circle',
         source: 'vessels',
         paint: {
-          'circle-radius': ['case', ['==', ['get', 'id'], selectedId ?? -1], 7, ['interpolate', ['linear'], ['zoom'], 1, 2.1, 5, 4.3]],
-          'circle-color': ['get', 'color'],
-          'circle-opacity': 0.86,
-          'circle-stroke-color': ['case', ['==', ['get', 'id'], selectedId ?? -1], '#FFFFFF', 'rgba(2,6,23,0.75)'],
-          'circle-stroke-width': ['case', ['==', ['get', 'id'], selectedId ?? -1], 2, 0.8],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 8, 5, 12],
+          'circle-color': 'rgba(0,0,0,0)',
+          'circle-stroke-color': ['get', 'color'],
+          'circle-stroke-opacity': 0.72,
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 1, 1.4, 5, 2.2],
+        },
+      })
+      VESSEL_TYPE_IDS.forEach(type => {
+        map.addLayer({
+          id: `vessels-${type}`,
+          type: 'symbol',
+          source: 'vessels',
+          filter: ['==', ['get', 'type'], type],
+          layout: {
+            'icon-image': `vessel-${type}`,
+            'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.56, 5, 0.74],
+            'icon-rotate': ['get', 'course'],
+            'icon-rotation-alignment': 'map',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+          },
+          paint: {
+            'icon-opacity': 0.98,
+          },
+        })
+      })
+      map.addLayer({
+        id: 'vessel-type-symbols',
+        type: 'symbol',
+        source: 'vessels',
+        layout: {
+          'text-field': ['get', 'symbol'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 1, 15, 5, 20],
+          'text-font': ['Open Sans Bold'],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-rotation-alignment': 'viewport',
+        },
+        paint: {
+          'text-color': ['get', 'color'],
+          'text-halo-color': '#020617',
+          'text-halo-width': 1.8,
+          'text-opacity': 1,
         },
       })
       setReady(true)
@@ -402,25 +487,27 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
   }, [ready, vessels])
 
   useEffect(() => {
-    if (!ready) return
+    if (!ready || vessels.length === 0 || hasFitVesselBoundsRef.current) return
     const map = mapRef.current
     if (!map) return
-    const visibility = (visible: boolean) => (visible ? 'visible' : 'none')
-    ;['vessels'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.vessels)))
-    ;['vessel-heat'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.heatmap)))
-    ;['ports', 'port-halos', 'port-labels'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.ports)))
-    ;['shipping-lanes', 'shipping-lanes-glow'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.lanes)))
-  }, [ready, layers])
+    const bounds = new maplibregl.LngLatBounds()
+    vessels.forEach(vessel => bounds.extend([normalizeLon(vessel.lon), vessel.lat]))
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 72, maxZoom: 2.8, duration: 650 })
+      hasFitVesselBoundsRef.current = true
+    }
+  }, [ready, vessels])
 
   useEffect(() => {
     if (!ready) return
     const map = mapRef.current
     if (!map) return
-    const selected = selectedId ?? -1
-    map.setPaintProperty('vessels', 'circle-radius', ['case', ['==', ['get', 'id'], selected], 7, ['interpolate', ['linear'], ['zoom'], 1, 2.1, 5, 4.3]])
-    map.setPaintProperty('vessels', 'circle-stroke-color', ['case', ['==', ['get', 'id'], selected], '#FFFFFF', 'rgba(2,6,23,0.75)'])
-    map.setPaintProperty('vessels', 'circle-stroke-width', ['case', ['==', ['get', 'id'], selected], 2, 0.8])
-  }, [ready, selectedId])
+    const visibility = (visible: boolean) => (visible ? 'visible' : 'none')
+    ;['vessel-halos', 'vessel-type-symbols', ...VESSEL_SYMBOL_LAYERS].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.vessels)))
+    ;['vessel-heat'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.heatmap)))
+    ;['ports', 'port-halos', 'port-labels'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.ports)))
+    ;['shipping-lanes', 'shipping-lanes-glow'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.lanes)))
+  }, [ready, layers])
 
   useEffect(() => {
     if (!ready || !selectedVessel) return
@@ -451,18 +538,22 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
     }
     const handleEnter = () => { map.getCanvas().style.cursor = 'pointer' }
     const handleLeave = () => { map.getCanvas().style.cursor = '' }
-    map.on('click', 'vessels', handleClick)
-    map.on('mouseenter', 'vessels', handleEnter)
-    map.on('mouseleave', 'vessels', handleLeave)
+    VESSEL_INTERACTION_LAYERS.forEach(id => {
+      map.on('click', id, handleClick)
+      map.on('mouseenter', id, handleEnter)
+      map.on('mouseleave', id, handleLeave)
+    })
     const handleMapClick = (event: maplibregl.MapMouseEvent) => {
-      const hits = map.queryRenderedFeatures(event.point, { layers: ['vessels'] })
+      const hits = map.queryRenderedFeatures(event.point, { layers: VESSEL_INTERACTION_LAYERS })
       if (hits.length === 0) onSelect(null)
     }
     map.on('click', handleMapClick)
     return () => {
-      map.off('click', 'vessels', handleClick)
-      map.off('mouseenter', 'vessels', handleEnter)
-      map.off('mouseleave', 'vessels', handleLeave)
+      VESSEL_INTERACTION_LAYERS.forEach(id => {
+        map.off('click', id, handleClick)
+        map.off('mouseenter', id, handleEnter)
+        map.off('mouseleave', id, handleLeave)
+      })
       map.off('click', handleMapClick)
     }
   }, [ready, onSelect])
@@ -474,7 +565,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
         background: 'rgba(12,18,33,0.86)', border: '1px solid var(--border-subtle)', borderRadius: 7,
         padding: '6px 9px', fontSize: 11, color: 'var(--text-secondary)', boxShadow: 'var(--shadow-sm)',
       }}>
-        Real basemap · scroll / drag / rotate
+        AIS positions · scroll / drag / rotate
       </div>
     </div>
   )
@@ -548,7 +639,9 @@ interface LayerState  { vessels: boolean; heatmap: boolean; ports: boolean; lane
 const FilterSidebar: React.FC<{
   filters: FilterState; onFilters: (f: FilterState) => void
   layers: LayerState;   onLayers:  (l: LayerState) => void
-}> = ({ filters, onFilters, layers, onLayers }) => {
+  counts: Record<VesselTypeId, number>
+  flags: string[]
+}> = ({ filters, onFilters, layers, onLayers, counts, flags }) => {
   const toggleType = (id: VesselTypeId) => {
     const next = new Set(filters.types)
     if (next.has(id)) { if (next.size > 1) next.delete(id) } else next.add(id)
@@ -565,7 +658,7 @@ const FilterSidebar: React.FC<{
               <input type="checkbox" checked={filters.types.has(id)} onChange={() => toggleType(id)} style={{ accentColor: info.color }} />
               <VesselSymbolIcon type={id} color={info.color} size={13} />
               <span style={{ flex: 1 }}>{info.label}</span>
-              <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{info.count.toLocaleString()}</span>
+              <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{counts[id].toLocaleString()}</span>
             </label>
           )
         })}
@@ -592,7 +685,7 @@ const FilterSidebar: React.FC<{
         <select value={filters.flag} onChange={e => onFilters({ ...filters, flag: e.target.value })}
           style={{ width: '100%', padding: '6px 8px', borderRadius: 6, fontSize: 12, background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-default)', fontFamily: 'IBM Plex Sans' }}>
           <option value="">All Flags</option>
-          {FLAGS.map(f => <option key={f} value={f}>{f}</option>)}
+          {flags.map(f => <option key={f} value={f}>{f}</option>)}
         </select>
       </div>
       <div style={{ marginTop: 'auto', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
@@ -606,7 +699,7 @@ const FilterSidebar: React.FC<{
 
 const VesselStatsOverlay: React.FC<{ vessels: Vessel[] }> = ({ vessels }) => {
   const byType = useMemo(() => {
-    const c: Record<VesselTypeId, number> = { container: 0, tanker: 0, bulk: 0, other: 0 }
+    const c = emptyTypeCounts()
     vessels.forEach(v => { c[v.type]++ }); return c
   }, [vessels])
   return (
@@ -631,23 +724,59 @@ const VesselStatsOverlay: React.FC<{ vessels: Vessel[] }> = ({ vessels }) => {
 
 export const VesselMap: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>({ types: new Set(VESSEL_TYPE_IDS), speedMax: 25, flag: '' })
-  const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: false, ports: true, lanes: true })
+  const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: false, ports: true, lanes: false })
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [vessels, setVessels] = useState<Vessel[]>([])
+  const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading')
 
-  const filtered = useMemo(() => ALL_VESSELS.filter(v =>
+  useEffect(() => {
+    let cancelled = false
+    const loadVessels = async () => {
+      try {
+        const rows = await apiClient.vesselSnapshot({ limit: 5000 })
+        if (!cancelled) {
+          setVessels(rows.map(mapApiVessel))
+          setStatus('live')
+        }
+      } catch {
+        if (!cancelled) setStatus('error')
+      }
+    }
+    loadVessels()
+    const interval = window.setInterval(loadVessels, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  const typeCounts = useMemo(() => {
+    const counts = emptyTypeCounts()
+    vessels.forEach(vessel => { counts[vessel.type]++ })
+    return counts
+  }, [vessels])
+
+  const flags = useMemo(
+    () => Array.from(new Set(vessels.map(vessel => vessel.flag).filter(flag => flag !== 'Unknown'))).sort(),
+    [vessels],
+  )
+
+  const filtered = useMemo(() => vessels.filter(v =>
     filters.types.has(v.type) && v.speed <= filters.speedMax && (!filters.flag || v.flag === filters.flag)
-  ), [filters])
+  ), [filters, vessels])
 
-  const selectedVessel = selectedId !== null ? ALL_VESSELS.find(v => v.id === selectedId) ?? null : null
+  const selectedVessel = selectedId !== null ? vessels.find(v => v.id === selectedId) ?? null : null
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
-      <FilterSidebar filters={filters} onFilters={setFilters} layers={layers} onLayers={setLayers} />
+      <FilterSidebar filters={filters} onFilters={setFilters} layers={layers} onLayers={setLayers} counts={typeCounts} flags={flags} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0 }}>
         <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: 'var(--shadow-md)', zIndex: 5 }}>
           <Icons.Globe size={14} style={{ color: 'var(--accent)' } as React.CSSProperties} />
           <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>GlobalSupplyWatch · Live Vessel Tracking</span>
-          <Badge variant="success">Live</Badge>
+          <Badge variant={status === 'error' ? 'danger' : status === 'loading' ? 'warning' : 'success'}>
+            {status === 'loading' ? 'Loading AIS' : status === 'error' ? 'API Error' : 'AIS Live'}
+          </Badge>
         </div>
         <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} layers={layers} />
         <VesselStatsOverlay vessels={filtered} />

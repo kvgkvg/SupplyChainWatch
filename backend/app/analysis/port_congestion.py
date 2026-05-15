@@ -12,6 +12,14 @@ def compute_port_congestion(db: Session) -> int:
             WITH latest AS (
                 SELECT MAX(time) AS snapshot_time FROM vessel_positions
             ),
+            latest_positions AS (
+                SELECT DISTINCT ON (vp.mmsi) vp.*
+                FROM vessel_positions vp
+                CROSS JOIN latest
+                WHERE latest.snapshot_time IS NOT NULL
+                  AND vp.time >= latest.snapshot_time - INTERVAL '15 minutes'
+                ORDER BY vp.mmsi, vp.time DESC
+            ),
             computed AS (
                 SELECT latest.snapshot_time AS time,
                        p.id AS port_id,
@@ -26,9 +34,8 @@ def compute_port_congestion(db: Session) -> int:
                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY vp.sog)::real AS median_speed
                 FROM ports p
                 CROSS JOIN latest
-                LEFT JOIN vessel_positions vp
-                  ON vp.time = latest.snapshot_time
-                 AND ST_DWithin(vp.geom, p.geom, p.radius_km * 1000)
+                LEFT JOIN latest_positions vp
+                  ON ST_DWithin(vp.geom, p.geom, p.radius_km * 1000)
                 WHERE latest.snapshot_time IS NOT NULL
                 GROUP BY latest.snapshot_time, p.id
             )

@@ -36,17 +36,24 @@ async def get_vessel_snapshot(
         text("""
             WITH latest AS (
                 SELECT MAX(time) AS snapshot_time FROM vessel_positions
+            ),
+            latest_positions AS (
+                SELECT DISTINCT ON (vp.mmsi) vp.*
+                FROM vessel_positions vp
+                CROSS JOIN latest
+                WHERE latest.snapshot_time IS NOT NULL
+                  AND vp.time >= latest.snapshot_time - INTERVAL '15 minutes'
+                ORDER BY vp.mmsi, vp.time DESC
             )
             SELECT vp.time, vp.mmsi, vp.lat, vp.lon, vp.sog, vp.cog, vp.nav_status,
                    v.name, v.type, v.type_label, v.flag
-            FROM vessel_positions vp
-            JOIN latest ON latest.snapshot_time = vp.time
+            FROM latest_positions vp
             LEFT JOIN vessels v ON v.mmsi = vp.mmsi
             WHERE ST_Intersects(
                 vp.geom::geometry,
                 ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat, 4326)
             )
-              AND (:vessel_type IS NULL OR v.type = :vessel_type)
+              AND (CAST(:vessel_type AS INTEGER) IS NULL OR v.type = :vessel_type)
             ORDER BY vp.mmsi
             LIMIT :limit OFFSET :offset
             """),

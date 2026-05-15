@@ -27,7 +27,7 @@ async def list_anomalies(
                    observed, expected, z_score, description, explanation, acknowledged
             FROM anomalies
             WHERE detected_at >= NOW() - (:days * INTERVAL '1 day')
-              AND (:severity IS NULL OR severity = :severity)
+              AND (CAST(:severity AS TEXT) IS NULL OR severity = :severity)
             ORDER BY detected_at DESC
             LIMIT 500
             """),

@@ -28,6 +28,30 @@ class VesselPositionRecord(BaseModel):
         return value.astimezone(UTC)
 
 
+class VesselRecord(BaseModel):
+    """Validated AIS vessel static-data record."""
+
+    mmsi: int
+    imo: int | None = None
+    name: str | None = None
+    type: int | None = None
+    type_label: str | None = None
+    flag: str | None = None
+    length: float | None = None
+    width: float | None = None
+    last_seen: datetime | None = None
+
+    @field_validator("last_seen")
+    @classmethod
+    def ensure_utc(cls, value: datetime | None) -> datetime | None:
+        """Normalize timestamps to UTC."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
 class FreightIndexRecord(BaseModel):
     """Validated freight index record."""
 

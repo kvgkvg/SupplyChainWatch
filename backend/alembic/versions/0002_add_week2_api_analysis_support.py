@@ -1,6 +1,6 @@
 """Add week 2 API analysis support.
 
-Revision ID: 0002_add_week2_api_analysis_support
+Revision ID: 0002_week2_api_analysis
 Revises: 0001_create_initial_schema
 Create Date: 2026-05-14
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0002_add_week2_api_analysis_support"
+revision = "0002_week2_api_analysis"
 down_revision = "0001_create_initial_schema"
 branch_labels = None
 depends_on = None

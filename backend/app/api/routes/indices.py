@@ -51,8 +51,8 @@ async def get_index_history(
             SELECT time, index_name, value, source, metadata
             FROM freight_indices
             WHERE index_name = :name
-              AND (:from_time IS NULL OR time >= :from_time)
-              AND (:to_time IS NULL OR time <= :to_time)
+              AND (CAST(:from_time AS TIMESTAMPTZ) IS NULL OR time >= :from_time)
+              AND (CAST(:to_time AS TIMESTAMPTZ) IS NULL OR time <= :to_time)
             ORDER BY time
             LIMIT :limit OFFSET :offset
             """),

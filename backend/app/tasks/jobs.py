@@ -20,7 +20,7 @@ from app.collectors.fred import FREDCollector
 from app.collectors.openmeteo import OpenMeteoMarineCollector
 from app.collectors.wci_scraper import WCIScraper
 from app.config import get_settings
-from app.db.models import BunkerPrice, FreightIndex, TradeFlow, VesselPosition
+from app.db.models import BunkerPrice, FreightIndex, TradeFlow, Vessel, VesselPosition
 from app.db.session import SessionLocal
 from app.llm.anomaly_explainer import explain_recent_high_anomalies
 from app.llm.forecast_commenter import comment_recent_forecasts
@@ -30,6 +30,7 @@ from app.schemas.records import (
     FreightIndexRecord,
     TradeFlowRecord,
     VesselPositionRecord,
+    VesselRecord,
 )
 from app.tasks.celery_app import celery_app
 
@@ -143,6 +144,20 @@ def _persist_records(records: list[BaseModel], db: Any) -> None:
                     sog=record.sog,
                     cog=record.cog,
                     nav_status=record.nav_status,
+                )
+            )
+        elif isinstance(record, VesselRecord):
+            db.merge(
+                Vessel(
+                    mmsi=record.mmsi,
+                    imo=record.imo if record.imo not in (0, None) else None,
+                    name=record.name,
+                    type=record.type,
+                    type_label=record.type_label,
+                    flag=record.flag,
+                    length=record.length,
+                    width=record.width,
+                    last_seen=record.last_seen,
                 )
             )
         elif isinstance(record, FreightIndexRecord):

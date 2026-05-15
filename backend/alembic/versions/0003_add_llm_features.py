@@ -1,7 +1,7 @@
 """Add LLM feature storage.
 
 Revision ID: 0003_add_llm_features
-Revises: 0002_add_week2_api_analysis_support
+Revises: 0002_week2_api_analysis
 Create Date: 2026-05-14
 """
 
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0003_add_llm_features"
-down_revision = "0002_add_week2_api_analysis_support"
+down_revision = "0002_week2_api_analysis"
 branch_labels = None
 depends_on = None
 

@@ -8,8 +8,15 @@ from app.config import get_settings
 from app.schemas.records import FreightIndexRecord
 
 FRED_SERIES = {
-    "BDI": "BDIY",
     "DCOILBRENTEU": "DCOILBRENTEU",
+    "DTWEXBGS": "DTWEXBGS",
+    "INDPRO": "INDPRO",
+    "CPIAUCSL": "CPIAUCSL",
+    "FEDFUNDS": "FEDFUNDS",
+    "DGS10": "DGS10",
+    "T10Y2Y": "T10Y2Y",
+    "PAYEMS": "PAYEMS",
+    "RSAFS": "RSAFS",
 }
 
 
@@ -30,17 +37,20 @@ class FREDCollector(BaseCollector[FreightIndexRecord]):
 
         rows: list[dict[str, Any]] = []
         for index_name, series_id in self.series.items():
-            payload = self.request_json(
-                "GET",
-                "https://api.stlouisfed.org/fred/series/observations",
-                params={
-                    "series_id": series_id,
-                    "api_key": settings.fred_api_key,
-                    "file_type": "json",
-                    "sort_order": "desc",
-                    "limit": 1000,
-                },
-            )
+            try:
+                payload = self.request_json(
+                    "GET",
+                    "https://api.stlouisfed.org/fred/series/observations",
+                    params={
+                        "series_id": series_id,
+                        "api_key": settings.fred_api_key,
+                        "file_type": "json",
+                        "sort_order": "desc",
+                        "limit": 1000,
+                    },
+                )
+            except CollectorError:
+                continue
             for observation in payload.get("observations", []):
                 value = observation.get("value")
                 if value in (None, "."):
