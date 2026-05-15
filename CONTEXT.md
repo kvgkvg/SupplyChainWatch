@@ -1,6 +1,6 @@
 # CONTEXT.md — GlobalSupplyWatch Progress Snapshot
 
-> Last updated: 2026-05-15 (updated after week 4 push)
+> Last updated: 2026-05-15 (vessel map fix + README how-to-run update)
 
 ---
 
@@ -101,6 +101,8 @@ Added a full LLM layer on top of the template insights:
 | Loading state (insights) | ✅ | Spinner/skeleton while insights fetch |
 | Docs written | ✅ | `docs/architecture.md`, `docs/insights.md` (6 insight targets), `docs/report.md`, `docs/slides.md`, `docs/demo_script.md`, `docs/week4_checklist.md` |
 | README LLM notes | ✅ | LLM setup section added |
+| VesselMap bug fix | ✅ | Vessel map rendering fixed (commit 26577f3) |
+| README how-to-run | ✅ | Frontend run steps, service URL table, make targets documented |
 | Toast notifications | 🔲 | Not yet implemented |
 | Jargon tooltip glossary | 🔲 | Not yet implemented |
 | 24 h pipeline run | 🔲 | Requires live Docker services (team action) |

@@ -1,73 +1,78 @@
 # GlobalSupplyWatch
 
-GlobalSupplyWatch is a local Docker Compose web app for monitoring global shipping supply chains.
+GlobalSupplyWatch monitors global shipping supply chains. Backend runs in Docker; frontend runs locally via Vite.
 
-## Week 1 Status
+## Running the Web
 
-The repository contains the foundation for the data pipeline:
+### 1. Backend (Docker)
 
-- Backend package scaffold with FastAPI, SQLAlchemy, Alembic, Celery, collectors, seeds, and tests.
-- Docker Compose skeleton for PostgreSQL with TimescaleDB/PostGIS, Redis, backend, worker, beat, Flower, and Mailhog.
-- Initial Alembic migration for the planned schema.
-- Collector modules for AISStream, FRED, UN Comtrade, Open-Meteo Marine, Ship & Bunker, Freightos FBX, and Drewry WCI.
-- Data-source documentation, notebook placeholders, and initial EDA guidance.
+```bash
+cp .env.example .env        # fill in API keys
+make up                     # start postgres, redis, backend, worker, beat, flower, mailhog
+make migrate                # run alembic migrations
+make seed                   # seed 50 ports + 5 chokepoints
+```
 
-## Week 2 Status
+### 2. Frontend (local)
 
-The backend API and analysis foundation are scaffolded:
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- FastAPI routes for indices, vessels, ports, chokepoints, anomalies, insights, correlations, and overview stats.
-- Redis cache helper for heavy reads.
-- Port congestion and chokepoint spatial analysis jobs.
-- Rolling z-score anomaly detection, moving-average forecasts, correlations, and template insights.
-- Postman collection at `docs/postman_collection.json`.
+Open **http://localhost:5173**. Vite proxies `/api` requests to the backend at `http://localhost:8000`.
 
-## Week 4 Status
+### Service URLs
 
-The final integration pass adds:
-
-- API-backed Insights Hub feed, correlation heatmap, anomaly timeline, and Story Mode.
-- Dashboard onboarding, stale-data warning, and API-backed latest insight feed.
-- Lazy-loaded Vessel Map bundle for better initial dashboard performance.
-- Submission support docs: `docs/architecture.md`, `docs/insights.md`, `docs/report.md`, `docs/slides.md`, `docs/demo_script.md`, and `docs/week4_checklist.md`.
-
-Live collection requires API keys in `.env`. Copy `.env.example` to `.env` and fill in the keys before starting services.
+| Service      | URL                       |
+|--------------|---------------------------|
+| Frontend     | http://localhost:5173      |
+| Backend API  | http://localhost:8000      |
+| API docs     | http://localhost:8000/docs |
+| Flower       | http://localhost:5555      |
+| Mailhog      | http://localhost:8025      |
+| PostgreSQL   | localhost:5432             |
+| Redis        | localhost:6379             |
 
 ## LLM Features
 
-GlobalSupplyWatch can enrich insights with Alibaba Cloud DashScope Qwen models through the OpenAI-compatible API. Set `DASHSCOPE_API_KEY` in `.env`; the key is read only from the environment and is never hardcoded. The default base URL is `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`.
+Insights can be enriched via Alibaba Cloud DashScope Qwen models (OpenAI-compatible API). Set `DASHSCOPE_API_KEY` in `.env`.
 
-Configurable model variables:
+Configurable env vars:
 
-- `LLM_MODEL_FAST=qwen3.6-flash` for short narratives, forecast commentary, and anomaly explanations.
-- `LLM_MODEL_FAST_FALLBACKS=qwen3.5-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash-2026-02-23`.
-- `LLM_MODEL_REASONING=deepseek-v4-flash` for Story Mode analysis.
-- `LLM_MODEL_REASONING_FALLBACKS=qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23`.
-- `LLM_ENABLED=true` can be set to `false` to force template fallbacks.
+| Variable | Default |
+|---|---|
+| `DASHSCOPE_API_KEY` | _(required for LLM)_ |
+| `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| `LLM_MODEL_FAST` | `qwen3.6-flash` |
+| `LLM_MODEL_FAST_FALLBACKS` | `qwen3.5-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash-2026-02-23` |
+| `LLM_MODEL_REASONING` | `deepseek-v4-flash` |
+| `LLM_MODEL_REASONING_FALLBACKS` | `qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23` |
+| `LLM_ENABLED` | `true` |
 
-The client retries the next configured model when a provider response indicates a token or context-limit failure. Translation (`qwen-mt-flash`), vision/video (`qwen3-vl-*`, `wan2.2-kf2v-flash`), and coder (`qwen3-coder-flash`) models are not used for the current text-only insight features.
-
-Run the provider smoke test from the backend container with:
-
-```bash
-python -m app.llm.client --test-ping
-```
-
-Normal tests skip real LLM calls. Use `make test-llm` only when `DASHSCOPE_API_KEY` is configured and you want to run opt-in provider checks.
-
-## Quick Start
+Set `LLM_ENABLED=false` to force template fallbacks. Smoke test:
 
 ```bash
-cp .env.example .env
-make up
-make migrate
-make seed
-make test
+python -m app.llm.client --test-ping   # run inside backend container
 ```
 
-## Local Backend Tooling
+Normal tests skip real LLM calls. Use `make test-llm` only when `DASHSCOPE_API_KEY` is set.
 
-Per project rules, create and activate the conda environment before running Python tooling outside Docker:
+## Other Make Targets
+
+```bash
+make down          # stop all services
+make logs          # tail all service logs
+make test          # run pytest inside backend container
+make test-llm      # run opt-in LLM provider tests
+make collect-all   # trigger all collectors via Celery
+make forecast      # trigger forecast generation
+make shell-be      # bash shell in backend container
+make shell-fe      # sh shell in frontend container
+```
+
+## Local Backend Tooling (without Docker)
 
 ```bash
 conda create -n globalsupplywatch python=3.11 -y
@@ -76,10 +81,9 @@ pip install -e backend[dev]
 pytest backend/tests
 ```
 
-## Services
+## Stack
 
-- Backend API: http://localhost:8000
-- Flower: http://localhost:5555
-- Mailhog: http://localhost:8025
-- PostgreSQL: localhost:5432
-- Redis: localhost:6379
+- **Backend**: FastAPI + SQLAlchemy + Alembic + Celery + Redis
+- **Database**: PostgreSQL 15 + TimescaleDB + PostGIS
+- **Frontend**: Vite + React 18 + TypeScript + Tailwind + MapLibre GL + deck.gl
+- **LLM**: DashScope Qwen (OpenAI-compatible) with safety validation gate
