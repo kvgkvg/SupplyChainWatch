@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import type { PortCongestionResponse } from '../api/client'
+import { congestionSeverity } from '../api/viewModels'
 
 export const PORT_DATA = [
   { name: 'Shanghai', lat: 31.2, lon: 121.5, congestion: 'high' as const },
@@ -18,9 +20,13 @@ export const PORT_DATA = [
 const congColor = { low: 'var(--cong-low)', medium: 'var(--cong-med)', high: 'var(--cong-high)' }
 const congHex = { low: '#22C55E', medium: '#EAB308', high: '#EF4444' }
 
-interface MiniMapProps { width?: number; height?: number }
+interface MiniMapProps {
+  width?: number
+  height?: number
+  congestion?: PortCongestionResponse[]
+}
 
-export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 200 }) => {
+export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 200, congestion = [] }) => {
   const [hoverPort, setHoverPort] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -60,12 +66,17 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
     map.keyboard.disable()
     mapRef.current = map
 
+    const currentPorts = PORT_DATA.map(port => {
+      const row = congestion.find(item => item.port_name?.toLowerCase() === port.name.toLowerCase())
+      return row ? { ...port, congestion: congestionSeverity(row) } : port
+    })
+
     map.on('load', () => {
       map.addSource('ports-mini', {
         type: 'geojson',
         data: {
           type: 'FeatureCollection',
-          features: PORT_DATA.map((port, index) => ({
+          features: currentPorts.map((port, index) => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [port.lon, port.lat] },
             properties: {
@@ -131,7 +142,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
       map.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [congestion])
 
   useEffect(() => {
     const map = mapRef.current
@@ -165,9 +176,9 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
           border: '1px solid var(--border-default)', borderRadius: 6,
           padding: '6px 8px', boxShadow: 'var(--shadow-sm)',
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{PORT_DATA[hoverPort].name}</div>
-          <div style={{ fontSize: 10, color: congColor[PORT_DATA[hoverPort].congestion], marginTop: 1 }}>
-            {PORT_DATA[hoverPort].congestion.toUpperCase()} congestion
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{PORT_DATA[hoverPort]?.name}</div>
+          <div style={{ fontSize: 10, color: congColor[PORT_DATA[hoverPort]?.congestion ?? 'low'], marginTop: 1 }}>
+            {(PORT_DATA[hoverPort]?.congestion ?? 'low').toUpperCase()} congestion
           </div>
         </div>
       )}

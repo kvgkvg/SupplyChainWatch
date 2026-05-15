@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -13,8 +13,36 @@ function queryString(params: object): string {
   return encoded ? `?${encoded}` : "";
 }
 
+export class ApiError extends Error {
+  status: number;
+  path: string;
+  detail: string;
+
+  constructor(message: string, options: { status: number; path: string; detail: string }) {
+    super(message);
+    this.name = "ApiError";
+    this.status = options.status;
+    this.path = options.path;
+    this.detail = options.detail;
+  }
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, init);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ApiError(`Unable to reach API at ${API_BASE_URL}`, {
+      status: 0,
+      path,
+      detail: error instanceof Error ? error.message : "Network request failed",
+    });
+  }
   if (!response.ok) {
     let detail = `API request failed: ${response.status}`;
     try {
@@ -23,7 +51,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep the status-based error when the backend does not return JSON.
     }
-    throw new Error(detail);
+    throw new ApiError(detail, { status: response.status, path, detail });
   }
   return (await response.json()) as T;
 }
@@ -58,6 +86,19 @@ export interface ForecastResponse {
   model_name?: string | null;
   model_params?: Record<string, unknown> | null;
   commentary?: string | null;
+}
+
+export interface ForecastPoint {
+  time?: string;
+  date?: string;
+  ds?: string;
+  yhat?: number;
+  value?: number;
+  prediction?: number;
+  lower?: number;
+  upper?: number;
+  yhat_lower?: number;
+  yhat_upper?: number;
 }
 
 export interface VesselSnapshotItem {
@@ -204,37 +245,40 @@ export interface AnomalyParams {
 }
 
 export const apiClient = {
-  health: () => request<HealthResponse>("/api/health"),
-  indices: () => request<IndexSummary[]>("/api/indices"),
-  indexHistory: (name: string, params: IndexHistoryParams = {}) =>
+  health: (init?: RequestInit) => request<HealthResponse>("/api/health", init),
+  indices: (init?: RequestInit) => request<IndexSummary[]>("/api/indices", init),
+  indexHistory: (name: string, params: IndexHistoryParams = {}, init?: RequestInit) =>
     request<IndexPoint[]>(
       `/api/indices/${encodeURIComponent(name)}${queryString(params)}`,
+      init,
     ),
-  indexForecast: (name: string) =>
-    request<ForecastResponse>(`/api/indices/${encodeURIComponent(name)}/forecast`),
-  vesselSnapshot: (params: VesselSnapshotParams = {}) =>
-    request<VesselSnapshotItem[]>(`/api/vessels/snapshot${queryString(params)}`),
-  vesselDetail: (mmsi: number) => request<VesselDetail>(`/api/vessels/${mmsi}`),
-  ports: (region?: string) => request<PortResponse[]>(`/api/ports${queryString({ region })}`),
-  portCongestion: () => request<PortCongestionResponse[]>("/api/ports/congestion"),
-  portTimeline: (portId: number, days = 30) =>
-    request<PortCongestionResponse[]>(`/api/ports/${portId}/timeline${queryString({ days })}`),
-  chokepoints: () => request<ChokepointResponse[]>("/api/chokepoints"),
-  chokepointTimeline: (chokepointId: number, days = 30) =>
+  indexForecast: (name: string, init?: RequestInit) =>
+    request<ForecastResponse>(`/api/indices/${encodeURIComponent(name)}/forecast`, init),
+  vesselSnapshot: (params: VesselSnapshotParams = {}, init?: RequestInit) =>
+    request<VesselSnapshotItem[]>(`/api/vessels/snapshot${queryString(params)}`, init),
+  vesselDetail: (mmsi: number, init?: RequestInit) => request<VesselDetail>(`/api/vessels/${mmsi}`, init),
+  ports: (region?: string, init?: RequestInit) => request<PortResponse[]>(`/api/ports${queryString({ region })}`, init),
+  portCongestion: (init?: RequestInit) => request<PortCongestionResponse[]>("/api/ports/congestion", init),
+  portTimeline: (portId: number, days = 30, init?: RequestInit) =>
+    request<PortCongestionResponse[]>(`/api/ports/${portId}/timeline${queryString({ days })}`, init),
+  chokepoints: (init?: RequestInit) => request<ChokepointResponse[]>("/api/chokepoints", init),
+  chokepointTimeline: (chokepointId: number, days = 30, init?: RequestInit) =>
     request<ChokepointTimelinePoint[]>(
       `/api/chokepoints/${chokepointId}/timeline${queryString({ days })}`,
+      init,
     ),
-  anomalies: (params: AnomalyParams = { days: 30 }) =>
-    request<AnomalyResponse[]>(`/api/anomalies${queryString(params)}`),
-  latestInsights: (limit = 10) =>
-    request<InsightResponse[]>(`/api/insights/latest${queryString({ limit })}`),
-  storyAnalyze: (body: StoryAnalyzeRequest) =>
+  anomalies: (params: AnomalyParams = { days: 30 }, init?: RequestInit) =>
+    request<AnomalyResponse[]>(`/api/anomalies${queryString(params)}`, init),
+  latestInsights: (limit = 10, init?: RequestInit) =>
+    request<InsightResponse[]>(`/api/insights/latest${queryString({ limit })}`, init),
+  storyAnalyze: (body: StoryAnalyzeRequest, init?: RequestInit) =>
     request<StoryAnalyzeResponse>("/api/story/analyze", {
+      ...init,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...init?.headers },
       body: JSON.stringify(body),
     }),
-  correlations: (indices: string, days = 180) =>
-    request<CorrelationCell[]>(`/api/correlations${queryString({ indices, days })}`),
-  overviewStats: () => request<OverviewStats>("/api/stats/overview"),
+  correlations: (indices: string, days = 180, init?: RequestInit) =>
+    request<CorrelationCell[]>(`/api/correlations${queryString({ indices, days })}`, init),
+  overviewStats: (init?: RequestInit) => request<OverviewStats>("/api/stats/overview", init),
 };

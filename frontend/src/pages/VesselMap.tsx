@@ -1,10 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import maplibregl, { type MapLayerMouseEvent } from 'maplibre-gl'
+import { useQuery } from '@tanstack/react-query'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { PORT_DATA } from '../components/MiniMap'
 import { Badge } from '../components/Badge'
 import { Icons } from '../components/icons'
-import { apiClient, type VesselSnapshotItem } from '../api/client'
+import { apiClient, type VesselDetail, type VesselSnapshotItem } from '../api/client'
+import { queryKeys } from '../api/queries'
+import { EmptyState, ErrorPanel } from '../components/DataState'
 
 // ---- Vessel types ----
 
@@ -181,6 +184,7 @@ interface RealMapProps {
   vessels: Vessel[]
   selectedId: number | null
   onSelect: (id: number | null) => void
+  onViewport: (bbox: string) => void
   layers: { vessels: boolean; heatmap: boolean; ports: boolean; lanes: boolean }
 }
 
@@ -298,7 +302,17 @@ function addVesselIcons(map: maplibregl.Map): void {
   })
 }
 
-const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, layers }) => {
+function mapBoundsToBbox(map: maplibregl.Map): string {
+  const bounds = map.getBounds()
+  return [
+    bounds.getWest().toFixed(4),
+    bounds.getSouth().toFixed(4),
+    bounds.getEast().toFixed(4),
+    bounds.getNorth().toFixed(4),
+  ].join(',')
+}
+
+const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const popupRef = useRef<maplibregl.Popup | null>(null)
@@ -468,6 +482,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
         },
       })
       setReady(true)
+      onViewport(mapBoundsToBbox(map))
     })
 
     return () => {
@@ -476,7 +491,23 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       mapRef.current = null
       setReady(false)
     }
-  }, [])
+  }, [onViewport])
+
+  useEffect(() => {
+    if (!ready) return
+    const map = mapRef.current
+    if (!map) return
+    let timer: number | undefined
+    const handleMoveEnd = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => onViewport(mapBoundsToBbox(map)), 180)
+    }
+    map.on('moveend', handleMoveEnd)
+    return () => {
+      window.clearTimeout(timer)
+      map.off('moveend', handleMoveEnd)
+    }
+  }, [ready, onViewport])
 
   useEffect(() => {
     if (!ready) return
@@ -573,9 +604,10 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
 // ---- Vessel Drawer ----
 
-const VesselDrawer: React.FC<{ vessel: Vessel; onClose: () => void }> = ({ vessel, onClose }) => {
+const VesselDrawer: React.FC<{ vessel: Vessel; detail?: VesselDetail; loading?: boolean; onClose: () => void }> = ({ vessel, detail, loading, onClose }) => {
   const info = VESSEL_TYPE_INFO[vessel.type]
-  const trackPts = Array.from({ length: 14 }, (_, i) => ({
+  const realTrack = detail?.track?.slice().reverse().map(point => ({ x: point.lon, y: point.lat })) ?? []
+  const trackPts = realTrack.length > 1 ? realTrack : Array.from({ length: 14 }, (_, i) => ({
     x: vessel.lon - (14 - i) * 0.8 + Math.sin(i) * 0.5,
     y: vessel.lat + (14 - i) * 0.3 * Math.cos(i * 0.7),
   }))
@@ -613,7 +645,7 @@ const VesselDrawer: React.FC<{ vessel: Vessel; onClose: () => void }> = ({ vesse
         </div>
         <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>7-Day Track</div>
         <div style={{ background: '#060B16', borderRadius: 6, padding: 8 }}>
-          <svg width="100%" viewBox="0 0 250 90" style={{ display: 'block' }}>
+          {loading ? <div style={{ height: 90, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading track...</div> : <svg width="100%" viewBox="0 0 250 90" style={{ display: 'block' }}>
             <polyline
               points={trackPts.map(pt => `${10 + ((pt.x - minX) / rx) * 230},${10 + (1 - (pt.y - minY) / ry) * 70}`).join(' ')}
               fill="none" stroke={info.color} strokeWidth="1.5" strokeLinejoin="round" opacity="0.8"
@@ -624,7 +656,10 @@ const VesselDrawer: React.FC<{ vessel: Vessel; onClose: () => void }> = ({ vesse
               return <circle key={i} cx={x} cy={y} r={i === trackPts.length - 1 ? 3.5 : 1.5}
                 fill={i === trackPts.length - 1 ? info.color : info.color + '80'} />
             })}
-          </svg>
+          </svg>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+          {realTrack.length > 1 ? `${realTrack.length} API track points` : 'Fallback track shown because no detail track was returned.'}
         </div>
       </div>
     </div>
@@ -726,29 +761,15 @@ export const VesselMap: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>({ types: new Set(VESSEL_TYPE_IDS), speedMax: 25, flag: '' })
   const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: false, ports: true, lanes: false })
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [vessels, setVessels] = useState<Vessel[]>([])
-  const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading')
+  const [bbox, setBbox] = useState('-180,-90,180,90')
+  const updateViewport = useCallback((next: string) => setBbox(prev => prev === next ? prev : next), [])
 
-  useEffect(() => {
-    let cancelled = false
-    const loadVessels = async () => {
-      try {
-        const rows = await apiClient.vesselSnapshot({ limit: 5000 })
-        if (!cancelled) {
-          setVessels(rows.map(mapApiVessel))
-          setStatus('live')
-        }
-      } catch {
-        if (!cancelled) setStatus('error')
-      }
-    }
-    loadVessels()
-    const interval = window.setInterval(loadVessels, 60_000)
-    return () => {
-      cancelled = true
-      window.clearInterval(interval)
-    }
-  }, [])
+  const vesselQuery = useQuery({
+    queryKey: queryKeys.vessels(bbox, 5000),
+    queryFn: ({ signal }) => apiClient.vesselSnapshot({ bbox, limit: 5000 }, { signal }),
+    refetchInterval: 60_000,
+  })
+  const vessels = useMemo(() => (vesselQuery.data ?? []).map(mapApiVessel), [vesselQuery.data])
 
   const typeCounts = useMemo(() => {
     const counts = emptyTypeCounts()
@@ -766,6 +787,14 @@ export const VesselMap: React.FC = () => {
   ), [filters, vessels])
 
   const selectedVessel = selectedId !== null ? vessels.find(v => v.id === selectedId) ?? null : null
+  const detailQuery = useQuery({
+    queryKey: selectedId !== null ? queryKeys.vesselDetail(selectedId) : ['vessels', 'no-selection'],
+    queryFn: ({ signal }) => apiClient.vesselDetail(selectedId!, { signal }),
+    enabled: selectedId !== null,
+    retry: false,
+  })
+
+  const status: 'loading' | 'live' | 'error' = vesselQuery.isLoading ? 'loading' : vesselQuery.isError ? 'error' : 'live'
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
@@ -777,10 +806,21 @@ export const VesselMap: React.FC = () => {
           <Badge variant={status === 'error' ? 'danger' : status === 'loading' ? 'warning' : 'success'}>
             {status === 'loading' ? 'Loading AIS' : status === 'error' ? 'API Error' : 'AIS Live'}
           </Badge>
+          <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} shown</span>
         </div>
-        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} layers={layers} />
+        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} />
         <VesselStatsOverlay vessels={filtered} />
-        {selectedVessel && <VesselDrawer vessel={selectedVessel} onClose={() => setSelectedId(null)} />}
+        {vesselQuery.isError && (
+          <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
+            <ErrorPanel error={vesselQuery.error} title="Vessel snapshot unavailable" compact />
+          </div>
+        )}
+        {!vesselQuery.isLoading && !vesselQuery.isError && vessels.length === 0 && (
+          <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
+            <EmptyState title="No vessels in this viewport" detail="Pan or zoom out, or run AIS collectors before the demo." compact />
+          </div>
+        )}
+        {selectedVessel && <VesselDrawer vessel={selectedVessel} detail={detailQuery.data} loading={detailQuery.isLoading} onClose={() => setSelectedId(null)} />}
       </div>
     </div>
   )
