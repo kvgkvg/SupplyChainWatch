@@ -7,7 +7,7 @@ GlobalSupplyWatch monitors global shipping supply chains. Backend runs in Docker
 ### 1. Backend (Docker)
 
 ```bash
-cp .env.example .env        # fill in API keys
+cp .env.example .env       
 make up                     
 ```
 
