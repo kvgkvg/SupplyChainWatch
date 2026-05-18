@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-import logging
-import os
-import subprocess
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -26,88 +20,10 @@ from app.api.routes.stats import router as stats_router
 from app.api.routes.story import router as story_router
 from app.api.routes.vessels import router as vessels_router
 
-logger = logging.getLogger(__name__)
-
-STARTUP_MAKE_ENV = "GSW_RUN_STARTUP_MAKE"
-STARTUP_MAKE_TIMEOUT_SECONDS = 300
-STARTUP_MAKE_TARGETS = ("up", "migrate", "collect-all", "seed")
-STARTUP_FALLBACK_COMMANDS = (
-    ("migrate", ("alembic", "upgrade", "head")),
-    ("collect-all", ("celery", "-A", "app.tasks.celery_app", "call", "collect_all")),
-    ("seed", ("python", "-m", "app.scripts.seed_reference_data")),
-)
-
-
-def _repo_root() -> Path | None:
-    """Return the repository root when the backend can see the root Makefile."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "Makefile").is_file():
-            return parent
-    return None
-
-
-def _startup_make_enabled() -> bool:
-    """Return whether startup Make targets should run for this process."""
-    return os.getenv(STARTUP_MAKE_ENV, "true").lower() in {"1", "true", "yes", "on"}
-
-
-def _run_startup_make_targets() -> None:
-    """Run local bootstrap Make targets when the API process starts."""
-    if not _startup_make_enabled():
-        logger.info("Startup Make targets disabled by %s", STARTUP_MAKE_ENV)
-        return
-
-    root = _repo_root()
-    if root is None:
-        logger.warning("Repository Makefile is not visible; running in-container startup commands")
-        cwd = Path.cwd()
-        env = os.environ.copy()
-        env[STARTUP_MAKE_ENV] = "false"
-        for target, command in STARTUP_FALLBACK_COMMANDS:
-            _run_startup_command(target, command, cwd, env)
-        return
-
-    env = os.environ.copy()
-    env[STARTUP_MAKE_ENV] = "false"
-    for target in STARTUP_MAKE_TARGETS:
-        _run_startup_command(target, ("make", target), root, env)
-
-
-def _run_startup_command(
-    target: str, command: tuple[str, ...], cwd: Path, env: dict[str, str]
-) -> None:
-    """Run one startup command and fail startup if it exits unsuccessfully."""
-    logger.info("Running startup target %s: %s", target, " ".join(command))
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=STARTUP_MAKE_TIMEOUT_SECONDS,
-    )
-    if completed.stdout:
-        logger.info("Startup target %s stdout:\n%s", target, completed.stdout.strip())
-    if completed.stderr:
-        logger.warning("Startup target %s stderr:\n%s", target, completed.stderr.strip())
-    if completed.returncode != 0:
-        msg = f"Startup target failed: {target} exited {completed.returncode}"
-        raise RuntimeError(msg)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Run bootstrap Make targets before serving API traffic."""
-    _run_startup_make_targets()
-    yield
-
-
 app = FastAPI(
     title="GlobalSupplyWatch API",
     description="Local supply-chain monitoring API.",
     version="0.1.0",
-    lifespan=lifespan,
     openapi_tags=[
         {"name": "health", "description": "Service liveness checks."},
         {"name": "indices", "description": "Freight and macro index time series."},
